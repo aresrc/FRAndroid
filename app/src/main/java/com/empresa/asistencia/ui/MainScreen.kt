@@ -28,8 +28,13 @@ import com.empresa.asistencia.data.EmployeeRepository
 import com.empresa.asistencia.domain.FaceAnalyzer
 import com.empresa.asistencia.domain.FaceRecognizer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 
 @Composable
 fun MainScreen() {
@@ -40,7 +45,11 @@ fun MainScreen() {
     // Estados
     var hasPermission by remember { mutableStateOf(false) }
     var detectedName by remember { mutableStateOf("Esperando...") }
-    var distanceMetric by remember { mutableStateOf(0f) }
+    var distanceMetric by remember { mutableFloatStateOf(0f) }
+    var lastEmbedding by remember { mutableStateOf<List<Float>?>(null) }
+    var showRegisterDialog by remember { mutableStateOf(false) }
+    var newEmployeeName by remember { mutableStateOf("") }
+    var showEmployeeList by remember { mutableStateOf(false) }
 
     // Repositorio e IA
     val repository = remember { EmployeeRepository(context) }
@@ -90,12 +99,12 @@ fun MainScreen() {
                         imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor(),
                             FaceAnalyzer(
                                 recognizer = recognizer,
-                                employeeList = employees,
+                                getEmployeeList = { employees },
                                 onFaceDetected = { /* Dibujar cuadro opcional */ },
-                                onPersonIdentified = { name, dist ->
+                                onPersonIdentified = { name, dist, embedding ->
                                     detectedName = name
                                     distanceMetric = dist
-
+                                    lastEmbedding = embedding
                                     // Lógica de Registro (ejemplo simple)
                                     if (name != "Desconocido" && name != "Sin rostro") {
                                         // Aquí podrías agregar un delay para no registrar 100 veces por segundo
@@ -125,6 +134,103 @@ fun MainScreen() {
                 }
             )
 
+            if (showRegisterDialog) {
+                AlertDialog(
+                    onDismissRequest = { showRegisterDialog = false },
+                    title = { Text("Registrar Empleado") },
+                    text = {
+                        Column {
+                            Text("Se detectó un rostro. Ingresa el nombre:")
+                            TextField(
+                                value = newEmployeeName,
+                                onValueChange = { newEmployeeName = it },
+                                placeholder = { Text("Nombre completo") }
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(onClick = {
+                            val embedding = lastEmbedding
+                            if (newEmployeeName.isNotBlank() && embedding != null) {
+                                scope.launch(Dispatchers.IO) {
+                                    val newEmployee = Employee(
+                                        id = System.currentTimeMillis().toString(),
+                                        name = newEmployeeName,
+                                        embedding = embedding
+                                    )
+                                    repository.saveEmployee(newEmployee) // Guarda en JSON
+
+                                    // Refrescar la lista en memoria para que lo reconozca de inmediato
+                                    employees = repository.getAllEmployees()
+
+                                    withContext(Dispatchers.Main) {
+                                        showRegisterDialog = false
+                                        newEmployeeName = ""
+                                    }
+                                }
+                            }
+                        }) { Text("Guardar") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showRegisterDialog = false }) { Text("Cancelar") }
+                    }
+                )
+            }
+
+            if (showEmployeeList) {
+                AlertDialog(
+                    onDismissRequest = { showEmployeeList = false },
+                    title = { Text("Empleados Registrados") },
+                    text = {
+                        // Definimos un alto para que no ocupe toda la pantalla si hay muchos
+                        Box(modifier = Modifier
+                            .height(400.dp)
+                            .fillMaxWidth()) {
+                            if (employees.isEmpty()) {
+                                Text("No hay empleados registrados.", modifier = Modifier.align(Alignment.Center))
+                            } else {
+                                LazyColumn {
+                                    items(employees) { employee ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(text = employee.name, style = MaterialTheme.typography.bodyLarge)
+                                                Text(text = "ID: ${employee.id}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                            }
+
+                                            IconButton(onClick = {
+                                                scope.launch(Dispatchers.IO) {
+                                                    repository.deleteEmployee(employee.id)
+                                                    // Actualizamos la lista local para que Compose refresque la UI
+                                                    employees = repository.getAllEmployees()
+                                                }
+                                            }) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "Borrar",
+                                                    tint = Color.Red
+                                                )
+                                            }
+                                        }
+                                        HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray)
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showEmployeeList = false }) {
+                            Text("Cerrar")
+                        }
+                    }
+                )
+            }
+
             // 2. Interfaz de Usuario (Overlay)
             Column(
                 modifier = Modifier
@@ -147,13 +253,19 @@ fun MainScreen() {
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Botón SIMULADO para registrar empleado (En app real, ocultar esto)
-                Button(onClick = {
-                    // Simular captura actual como nuevo empleado
-                    // En producción: Navegar a pantalla de registro y tomar foto controlada
-                    // Esto requiere lógica extra en el Analyzer para devolver el embedding actual
-                }) {
-                    Text("Modo Admin: Registrar")
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Botón de Registrar (el que ya tenías)
+                    Button(onClick = { if (lastEmbedding != null) showRegisterDialog = true }) {
+                        Text("Registrar")
+                    }
+
+                    // NUEVO: Botón para ver la lista
+                    Button(
+                        onClick = { showEmployeeList = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Gray)
+                    ) {
+                        Text("Ver Lista")
+                    }
                 }
             }
         }

@@ -13,8 +13,8 @@ import com.google.mlkit.vision.face.FaceDetectorOptions
 
 class FaceAnalyzer(
     private val recognizer: FaceRecognizer,
-    private val employeeList: List<Employee>,
-    private val onPersonIdentified: (String, Float) -> Unit, // Nombre, Distancia
+    private val getEmployeeList: () -> List<Employee>,
+    private val onPersonIdentified: (String, Float, List<Float>?) -> Unit, // Nombre, Distancia
     private val onFaceDetected: (Rect) -> Unit // Para dibujar el cuadro
 ) : ImageAnalysis.Analyzer {
 
@@ -62,7 +62,9 @@ class FaceAnalyzer(
                         var identifiedName = "Desconocido"
                         var minDistance = Float.MAX_VALUE
 
-                        for (employee in employeeList) {
+                        val currentList = getEmployeeList()
+
+                        for (employee in currentList) {
                             val distance = recognizer.calculateDistance(currentEmbedding, employee.embedding)
                             if (distance < minDistance) {
                                 minDistance = distance
@@ -74,9 +76,9 @@ class FaceAnalyzer(
                             }
                         }
 
-                        onPersonIdentified(identifiedName, minDistance)
+                        onPersonIdentified(identifiedName, minDistance, currentEmbedding)
                     } else {
-                        onPersonIdentified("Sin rostro", 0f)
+                        onPersonIdentified("Sin rostro", 0f, null)
                     }
                 }
                 .addOnCompleteListener {
@@ -96,10 +98,11 @@ class FaceAnalyzer(
     }
 
     private fun getValidRect(rect: Rect, width: Int, height: Int): Rect {
-        val left = rect.left.coerceAtLeast(0)
-        val top = rect.top.coerceAtLeast(0)
-        val right = rect.right.coerceAtMost(width)
-        val bottom = rect.bottom.coerceAtMost(height)
+        val padding = (rect.width() * 0.15f).toInt() // Añadimos un 15% de margen
+        val left = (rect.left - padding).coerceAtLeast(0)
+        val top = (rect.top - padding).coerceAtLeast(0)
+        val right = (rect.right + padding).coerceAtMost(width)
+        val bottom = (rect.bottom + padding).coerceAtMost(height)
         return Rect(left, top, right, bottom)
     }
 }

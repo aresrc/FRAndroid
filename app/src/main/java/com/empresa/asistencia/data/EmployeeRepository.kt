@@ -38,6 +38,15 @@ class EmployeeRepository(private val context: Context) {
         return gson.fromJson(jsonString, type) ?: emptyList()
     }
 
+    fun deleteEmployee(id: String) {
+        val currentList = getAllEmployees().toMutableList()
+        // Eliminamos al empleado que coincida con el ID
+        currentList.removeIf { it.id == id }
+
+        val jsonString = gson.toJson(currentList)
+        val file = File(context.filesDir, fileName)
+        file.writeText(jsonString)
+    }
     // Simular registro de asistencia (Log)
     fun logAttendance(employee: Employee) {
         // Aquí podrías guardar en otro JSON con fecha/hora

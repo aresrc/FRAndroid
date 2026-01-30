@@ -28,13 +28,18 @@ class FaceRecognizer(context: Context) {
             val options = Interpreter.Options()
             options.setNumThreads(4) // Usar 4 hilos para rapidez
             interpreter = Interpreter(FileUtil.loadMappedFile(context, modelName), options)
+            android.util.Log.d("IA_DEBUG", "Modelo cargado con éxito") // Añade esto
         } catch (e: Exception) {
             e.printStackTrace()
+            android.util.Log.e("IA_DEBUG", "Error cargando el modelo: ${e.message}")
         }
     }
 
     fun getFaceEmbedding(bitmap: Bitmap): List<Float> {
-        if (interpreter == null) return emptyList()
+        if (interpreter == null) {
+            android.util.Log.e("IA_DEBUG", "El intérprete es NULL, no se puede procesar")
+            return emptyList()
+        }
 
         // 1. Pre-procesamiento de la imagen
         val imageProcessor = ImageProcessor.Builder()
