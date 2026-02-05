@@ -12,58 +12,40 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import com.empresa.asistencia.data.Employee
-import com.empresa.asistencia.data.EmployeeRepository
 import com.empresa.asistencia.domain.FaceAnalyzer
-import com.empresa.asistencia.domain.FaceRecognizer
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen() {
+fun MainScreen(viewModel: MainViewModel = viewModel()) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val scope = rememberCoroutineScope()
 
-    // Estados
+    // Observar estados del ViewModel usando collectAsState
+    val employees by viewModel.employees.collectAsState()
+    val detectedName by viewModel.detectedName.collectAsState()
+    val distanceMetric by viewModel.distanceMetric.collectAsState()
+    val showRegisterDialog by viewModel.showRegisterDialog.collectAsState()
+    val showEmployeeList by viewModel.showEmployeeList.collectAsState()
+    val newEmployeeName by viewModel.newEmployeeName.collectAsState()
+    val lastEmbedding by viewModel.lastEmbedding.collectAsState()
+
+    // Gestión de permisos de cámara
     var hasPermission by remember { mutableStateOf(false) }
-    var detectedName by remember { mutableStateOf("Esperando...") }
-    var distanceMetric by remember { mutableFloatStateOf(0f) }
-    var lastEmbedding by remember { mutableStateOf<List<Float>?>(null) }
-    var showRegisterDialog by remember { mutableStateOf(false) }
-    var newEmployeeName by remember { mutableStateOf("") }
-    var showEmployeeList by remember { mutableStateOf(false) }
-
-    // Repositorio e IA
-    val repository = remember { EmployeeRepository(context) }
-    val recognizer = remember { FaceRecognizer(context) }
-
-    // Lista de empleados en memoria para búsqueda rápida
-    var employees by remember { mutableStateOf(emptyList<Employee>()) }
-
-    // Cargar empleados al iniciar
-    LaunchedEffect(Unit) {
-        employees = withContext(Dispatchers.IO) { repository.getAllEmployees() }
-    }
-
-    // Permisos
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
         onResult = { granted -> hasPermission = granted }
@@ -73,10 +55,16 @@ fun MainScreen() {
         launcher.launch(Manifest.permission.CAMERA)
     }
 
-    if (hasPermission) {
-        Box(modifier = Modifier.fillMaxSize()) {
+    if (!hasPermission) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Se requiere permiso de cámara")
+        }
+        return
+    }
 
-            // 1. Vista de Cámara
+    Scaffold { paddingValues ->
+        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+            // Capa 1: Vista Previa de Cámara
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->
@@ -86,37 +74,29 @@ fun MainScreen() {
                     cameraProviderFuture.addListener({
                         val cameraProvider = cameraProviderFuture.get()
 
-                        // Configurar Preview
-                        val preview = Preview.Builder().build()
-                        preview.setSurfaceProvider(previewView.surfaceProvider)
+                        val preview = Preview.Builder().build().apply {
+                            setSurfaceProvider(previewView.surfaceProvider)
+                        }
 
-                        // Configurar Análisis de Imagen (IA)
                         val imageAnalysis = ImageAnalysis.Builder()
-                            .setTargetResolution(Size(640, 480)) // Baja res para velocidad
+                            .setTargetResolution(Size(640, 480))
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .build()
 
-                        imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor(),
+                        // Configurar el analizador con lógica del ViewModel
+                        imageAnalysis.setAnalyzer(
+                            Executors.newSingleThreadExecutor(),
                             FaceAnalyzer(
-                                recognizer = recognizer,
+                                recognizer = viewModel.recognizer,
                                 getEmployeeList = { employees },
-                                onFaceDetected = { /* Dibujar cuadro opcional */ },
+                                onFaceDetected = { /* Opcional: manejar rectángulos */ },
                                 onPersonIdentified = { name, dist, embedding ->
-                                    detectedName = name
-                                    distanceMetric = dist
-                                    lastEmbedding = embedding
-                                    // Lógica de Registro (ejemplo simple)
-                                    if (name != "Desconocido" && name != "Sin rostro") {
-                                        // Aquí podrías agregar un delay para no registrar 100 veces por segundo
-                                        // repository.logAttendance(...)
-                                    }
+                                    viewModel.onFaceIdentified(name, dist, embedding)
                                 }
                             )
                         )
 
-                        // Usar cámara frontal
                         val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
-
                         try {
                             cameraProvider.unbindAll()
                             cameraProvider.bindToLifecycle(
@@ -129,149 +109,111 @@ fun MainScreen() {
                             e.printStackTrace()
                         }
                     }, ContextCompat.getMainExecutor(ctx))
-
                     previewView
                 }
             )
 
-            if (showRegisterDialog) {
-                AlertDialog(
-                    onDismissRequest = { showRegisterDialog = false },
-                    title = { Text("Registrar Empleado") },
-                    text = {
-                        Column {
-                            Text("Se detectó un rostro. Ingresa el nombre:")
-                            TextField(
-                                value = newEmployeeName,
-                                onValueChange = { newEmployeeName = it },
-                                placeholder = { Text("Nombre completo") }
-                            )
-                        }
-                    },
-                    confirmButton = {
-                        Button(onClick = {
-                            val embedding = lastEmbedding
-                            if (newEmployeeName.isNotBlank() && embedding != null) {
-                                scope.launch(Dispatchers.IO) {
-                                    val newEmployee = Employee(
-                                        id = System.currentTimeMillis().toString(),
-                                        name = newEmployeeName,
-                                        embedding = embedding
-                                    )
-                                    repository.saveEmployee(newEmployee) // Guarda en JSON
-
-                                    // Refrescar la lista en memoria para que lo reconozca de inmediato
-                                    employees = repository.getAllEmployees()
-
-                                    withContext(Dispatchers.Main) {
-                                        showRegisterDialog = false
-                                        newEmployeeName = ""
-                                    }
-                                }
-                            }
-                        }) { Text("Guardar") }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showRegisterDialog = false }) { Text("Cancelar") }
-                    }
-                )
+            // Capa 2: Información de Detección (Overlay)
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(16.dp)
+                    .background(Color.Black.copy(alpha = 0.6f), shape = MaterialTheme.shapes.medium)
+                    .padding(12.dp)
+            ) {
+                Text("Persona: $detectedName", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                Text("Distancia: ${"%.2f".format(distanceMetric)}", color = Color.White)
             }
 
-            if (showEmployeeList) {
-                AlertDialog(
-                    onDismissRequest = { showEmployeeList = false },
-                    title = { Text("Empleados Registrados") },
-                    text = {
-                        // Definimos un alto para que no ocupe toda la pantalla si hay muchos
-                        Box(modifier = Modifier
-                            .height(400.dp)
-                            .fillMaxWidth()) {
-                            if (employees.isEmpty()) {
-                                Text("No hay empleados registrados.", modifier = Modifier.align(Alignment.Center))
-                            } else {
-                                LazyColumn {
-                                    items(employees) { employee ->
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(text = employee.name, style = MaterialTheme.typography.bodyLarge)
-                                                Text(text = "ID: ${employee.id}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                                            }
-
-                                            IconButton(onClick = {
-                                                scope.launch(Dispatchers.IO) {
-                                                    repository.deleteEmployee(employee.id)
-                                                    // Actualizamos la lista local para que Compose refresque la UI
-                                                    employees = repository.getAllEmployees()
-                                                }
-                                            }) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Delete,
-                                                    contentDescription = "Borrar",
-                                                    tint = Color.Red
-                                                )
-                                            }
-                                        }
-                                        HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray)
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { showEmployeeList = false }) {
-                            Text("Cerrar")
-                        }
-                    }
-                )
-            }
-
-            // 2. Interfaz de Usuario (Overlay)
+            // Capa 3: Botones de Acción
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .background(Color.Black.copy(alpha = 0.7f))
-                    .fillMaxWidth()
-                    .padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = if (detectedName == "Desconocido") "Acceso Denegado" else "Hola, $detectedName",
-                    color = if (detectedName == "Desconocido") Color.Red else Color.Green,
-                    fontSize = 24.sp,
-                    style = MaterialTheme.typography.titleLarge
-                )
-                Text(
-                    text = "Confianza: ${"%.2f".format(1.0f - distanceMetric)}", // Inverso de distancia para mostrar "confianza"
-                    color = Color.White
-                )
+                Button(
+                    onClick = { viewModel.showRegisterDialog.value = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = lastEmbedding != null
+                ) {
+                    Text("Registrar Rostro Actual")
+                }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    // Botón de Registrar (el que ya tenías)
-                    Button(onClick = { if (lastEmbedding != null) showRegisterDialog = true }) {
-                        Text("Registrar")
-                    }
-
-                    // NUEVO: Botón para ver la lista
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
-                        onClick = { showEmployeeList = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Gray)
+                        onClick = { viewModel.showEmployeeList.value = true },
+                        modifier = Modifier.weight(1f)
                     ) {
                         Text("Ver Lista")
+                    }
+                    Button(
+                        onClick = { viewModel.loadEmployees() },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Actualizar")
                     }
                 }
             }
         }
-    } else {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Se necesita permiso de cámara")
-        }
+    }
+
+    // --- Diálogos de la UI ---
+
+    if (showRegisterDialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.showRegisterDialog.value = false },
+            title = { Text("Nuevo Registro") },
+            text = {
+                Column {
+                    Text("Ingrese el nombre para este rostro:")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = newEmployeeName,
+                        onValueChange = { viewModel.newEmployeeName.value = it },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.saveEmployee() }) { Text("Guardar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.showRegisterDialog.value = false }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    if (showEmployeeList) {
+        AlertDialog(
+            onDismissRequest = { viewModel.showEmployeeList.value = false },
+            title = { Text("Empleados Registrados") },
+            text = {
+                Box(modifier = Modifier.height(300.dp)) {
+                    if (employees.isEmpty()) {
+                        Text("No hay registros", modifier = Modifier.align(Alignment.Center))
+                    } else {
+                        LazyColumn {
+                            items(employees) { emp ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(emp.name, modifier = Modifier.weight(1f))
+                                    IconButton(onClick = { viewModel.deleteEmployee(emp.id) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = Color.Red)
+                                    }
+                                }
+                                Divider()
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.showEmployeeList.value = false }) { Text("Cerrar") }
+            }
+        )
     }
 }

@@ -9,7 +9,6 @@ import org.tensorflow.lite.support.common.ops.NormalizeOp
 import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
 import org.tensorflow.lite.support.image.ops.ResizeOp
-import java.nio.ByteBuffer
 import kotlin.math.sqrt
 
 class FaceRecognizer(context: Context) {

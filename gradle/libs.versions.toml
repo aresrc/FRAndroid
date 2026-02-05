@@ -10,9 +10,12 @@ activityCompose = "1.12.2"
 tensorflowLite = "2.17.0"
 composeBom = "2024.09.00"
 cameraX = "1.5.2"
-mlkitFace = "17.0.2"
+mlkitFace = "16.1.7"
 gson = "2.13.2"
 accompanist = "0.37.3"
+hilt = "2.50"
+hiltNavigationCompose = "1.2.0"
+navigationCompose = "2.7.7"
 
 
 
@@ -31,18 +34,23 @@ androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "u
 androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
-tensorflow-lite = { group = "org.tensorflow", name = "tensorflow-lite", version = "2.17.0" }
+tensorflow-lite = { group = "org.tensorflow", name = "tensorflow-lite", version.ref = "tensorflowLite" }
 tensorflow-lite-support = { module = "org.tensorflow:tensorflow-lite-support", version = "0.5.0" }
 androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "cameraX" }
 androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "cameraX" }
 androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "cameraX" }
 androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "cameraX" }
-google-mlkit-face-detection = { module = "com.google.mlkit:face-detection", version = "16.1.7" }
+google-mlkit-face-detection = { module = "com.google.mlkit:face-detection", version.ref = "mlkitFace" }
 google-gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
 google-accompanist-permissions = { module = "com.google.accompanist:accompanist-permissions", version.ref = "accompanist" }
+hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
+hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
+hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltNavigationCompose" }
+navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 

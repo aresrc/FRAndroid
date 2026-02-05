@@ -4,6 +4,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.hilt)
+    kotlin("kapt")
 }
 
 android {
@@ -54,6 +56,15 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+
+    // Hilt
+    implementation(libs.hilt.android)
+    kapt(libs.hilt.compiler)
+
+    // Navigation + Hilt Integration
+    implementation(libs.navigation.compose)
+    implementation(libs.hilt.navigation.compose)
+
     // CameraX
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)
@@ -64,7 +75,7 @@ dependencies {
     implementation(libs.google.mlkit.face.detection)
     implementation(libs.tensorflow.lite)
     implementation(libs.tensorflow.lite.support)
-    // Hola
+
     // Utils
     implementation(libs.google.gson)
     implementation(libs.google.accompanist.permissions)
@@ -76,4 +87,8 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+}
+
+kapt {
+    correctErrorTypes = true
 }
