@@ -1,84 +1,53 @@
+/*
+ * Ruta: app/src/main/java/com/empresa/asistencia/domain/FaceAnalyzer.kt
+ * Descripción: Analizador de CameraX que detecta rostros con ML Kit y extrae embeddings.
+ */
 package com.empresa.asistencia.domain
 
-
-import android.graphics.Bitmap
-import android.graphics.Matrix
-import android.graphics.Rect
+import android.graphics.*
+import androidx.annotation.OptIn
+import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
-import com.empresa.asistencia.data.Employee
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
+import java.io.ByteArrayOutputStream
 
 class FaceAnalyzer(
-    private val recognizer: FaceRecognizer,
-    private val getEmployeeList: () -> List<Employee>,
-    private val onPersonIdentified: (String, Float, List<Float>?) -> Unit, // Nombre, Distancia
-    private val onFaceDetected: (Rect) -> Unit // Para dibujar el cuadro
+    private val faceRecognizer: FaceRecognizer,
+    private val onFaceDetected: (FloatArray?) -> Unit
 ) : ImageAnalysis.Analyzer {
 
-    private val detector = FaceDetection.getClient(
-        FaceDetectorOptions.Builder()
-            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
-            .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
-            .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
-            .build()
-    )
+    // Configuración de ML Kit para alta precisión en detección de rostros
+    private val options = FaceDetectorOptions.Builder()
+        .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
+        .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
+        .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
+        .build()
 
-    // Threshold: Ajustar según pruebas. Menor es más estricto.
-    // 0.7 - 0.9 es común para MobileFaceNet
-    private val similarityThreshold = 0.8f
+    private val detector = FaceDetection.getClient(options)
 
-    @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
+    @OptIn(ExperimentalGetImage::class)
     override fun analyze(imageProxy: ImageProxy) {
         val mediaImage = imageProxy.image
         if (mediaImage != null) {
-            val inputImage = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+            val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
 
-            detector.process(inputImage)
+            detector.process(image)
                 .addOnSuccessListener { faces ->
                     if (faces.isNotEmpty()) {
-                        val face = faces.first() // Asumimos una persona a la vez
-                        onFaceDetected(face.boundingBox)
-
-                        // Aquí es donde convertimos el frame a Bitmap y recortamos la cara
-                        // NOTA: Esta conversión es costosa. En producción, optimizar con YUV to RGB converters
+                        val face = faces[0] // Procesamos solo el rostro principal
                         val bitmap = imageProxy.toBitmap()
-                        val rotatedBitmap = rotateBitmap(bitmap, imageProxy.imageInfo.rotationDegrees.toFloat())
-
-                        // Recortar la cara (asegurando coordenadas válidas)
-                        val cropRect = getValidRect(face.boundingBox, rotatedBitmap.width, rotatedBitmap.height)
-                        val faceBitmap = Bitmap.createBitmap(
-                            rotatedBitmap,
-                            cropRect.left, cropRect.top,
-                            cropRect.width(), cropRect.height()
-                        )
-
-                        // Obtener vector
-                        val currentEmbedding = recognizer.getFaceEmbedding(faceBitmap)
-
-                        // Buscar en la base de datos (1 vs N)
-                        var identifiedName = "Desconocido"
-                        var minDistance = Float.MAX_VALUE
-
-                        val currentList = getEmployeeList()
-
-                        for (employee in currentList) {
-                            val distance = recognizer.calculateDistance(currentEmbedding, employee.embedding)
-                            if (distance < minDistance) {
-                                minDistance = distance
-                            }
-                            if (distance < similarityThreshold) {
-                                identifiedName = employee.name
-                                // Encontramos al empleado, rompemos el bucle (o buscamos el mejor match)
-                                break
-                            }
+                        if (bitmap != null) {
+                            // Recortamos el área del rostro detectado
+                            val faceBitmap = cropFace(bitmap, face.boundingBox)
+                            // Extraemos los embeddings (vectores numéricos) del rostro
+                            val embeddings = faceRecognizer.getEmbedding(faceBitmap)
+                            onFaceDetected(embeddings)
                         }
-
-                        onPersonIdentified(identifiedName, minDistance, currentEmbedding)
                     } else {
-                        onPersonIdentified("Sin rostro", 0f, null)
+                        onFaceDetected(null)
                     }
                 }
                 .addOnCompleteListener {
@@ -89,20 +58,41 @@ class FaceAnalyzer(
         }
     }
 
-    private fun rotateBitmap(bitmap: Bitmap, degrees: Float): Bitmap {
-        val matrix = Matrix()
-        matrix.postRotate(degrees)
-        // Espejo si es cámara frontal
-        matrix.postScale(-1f, 1f, bitmap.width / 2f, bitmap.height / 2f)
-        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    private fun cropFace(bitmap: Bitmap, boundingBox: Rect): Bitmap {
+        // Aseguramos que el recorte esté dentro de los límites del bitmap
+        val left = boundingBox.left.coerceAtLeast(0)
+        val top = boundingBox.top.coerceAtLeast(0)
+        val width = boundingBox.width().coerceAtMost(bitmap.width - left)
+        val height = boundingBox.height().coerceAtMost(bitmap.height - top)
+
+        return Bitmap.createBitmap(bitmap, left, top, width, height)
     }
 
-    private fun getValidRect(rect: Rect, width: Int, height: Int): Rect {
-        val padding = (rect.width() * 0.15f).toInt() // Añadimos un 15% de margen
-        val left = (rect.left - padding).coerceAtLeast(0)
-        val top = (rect.top - padding).coerceAtLeast(0)
-        val right = (rect.right + padding).coerceAtMost(width)
-        val bottom = (rect.bottom + padding).coerceAtMost(height)
-        return Rect(left, top, right, bottom)
+    // Extensión para convertir ImageProxy de CameraX a Bitmap
+    private fun ImageProxy.toBitmap(): Bitmap? {
+        val nv21 = yuv420ToNv21(this)
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
+        val out = ByteArrayOutputStream()
+        yuvImage.compressToJpeg(Rect(0, 0, width, height), 100, out)
+        val imageBytes = out.toByteArray()
+        return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+    }
+
+    private fun yuv420ToNv21(image: ImageProxy): ByteArray {
+        val planes = image.planes
+        val yBuffer = planes[0].buffer
+        val uBuffer = planes[1].buffer
+        val vBuffer = planes[2].buffer
+
+        val ySize = yBuffer.remaining()
+        val uSize = uBuffer.remaining()
+        val vSize = vBuffer.remaining()
+
+        val nv21 = ByteArray(ySize + uSize + vSize)
+        yBuffer.get(nv21, 0, ySize)
+        vBuffer.get(nv21, ySize, vSize)
+        uBuffer.get(nv21, ySize + vSize, uSize)
+
+        return nv21
     }
 }
